@@ -30,7 +30,8 @@
    ;; Schema synchronization for SQL-JDBC drivers.
    [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
    ;; SQL execution helper functions.
-   [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]))
+   [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
+   ))
 
 ;; ----------------------------------------------------------------
 ;; Register this driver as a JDBC-based driver with parent :sql-jdbc.
@@ -63,41 +64,45 @@
 ;; ----------------------------------------------------------------
 ;; Build a connection spec from the provided database details.
 ;; This constructs a JDBC connection specification map for Arrow Flight SQL.
+;; ----------------------------------------------------------------
 (defmethod sql-jdbc.conn/connection-details->spec :arrow-flight-sql
   [_ details]
-  (-> (merge
-       {:classname   "org.apache.arrow.driver.jdbc.ArrowFlightJdbcDriver"  ;; JDBC driver class name
-        :subprotocol "arrow-flight-sql"                                    ;; JDBC subprotocol identifier
-        :subname     (let [host (if (and (string? (:host details))
-                                         (not (str/blank? (:host details))))
-                                  (:host details)
-                                  "localhost")                              ;; Default host is "localhost"
-                           port (if (or (nil? (:port details))
-                                        (and (string? (:port details))
-                                             (str/blank? (:port details))))
-                                  443                                       ;; Default port is 443
-                                  (:port details))
-                           query-params (->> {:user          (:user details)
-                                              :password      (:password details)
-                                              :token         (:token details)
-                                              :useEncryption (if (contains? details :useEncryption)
-                                                               (:useEncryption details)
-                                                               true)}
-                                             (filter (comp some? second))              ;; Filter out nil values
-                                             (map (fn [[k v]]
-                                                    (str (name k) "=" (codec/url-encode (str v))))) ;; URL encode parameters
-                                             (str/join "&"))]
-                       (str "//" host ":" port
-                            (when (not (str/blank? query-params))
-                              (str "/?" query-params))))              ;; Construct subname with optional query string
-        :cast        (fn [col val]
-                       (cond
-                         (and (= (:base-type col) :type/DateTime)
-                              (instance? java.sql.Timestamp val))
-                         (.toLocalDateTime ^java.sql.Timestamp val)  ;; Convert SQL Timestamp to LocalDateTime
-                         :else val))}                                  ;; Return value unchanged for other types
-       (dissoc details :host :port))
-      (sql-jdbc.common/handle-additional-options details)))           ;; Apply additional options if provided
+  (let [{:keys [host port token useEncryption disableCertificateVerification]
+         :or   {useEncryption true
+                disableCertificateVerification false}} details
+        ;; URI-encode _only_ the raw token
+        enc-token (when (and (string? token)
+                             (not (str/blank? token)))
+                    (codec/url-encode token))
+        ;; Manually assemble each key=value pair
+        params    (cond-> []
+                    enc-token    (conj (str "authorization=Bearer%20" enc-token))
+                    true         (conj (str "useEncryption=" useEncryption))
+                    true         (conj (str "disableCertificateVerification="
+                                            disableCertificateVerification)))
+        qp         (str/join "&" params)
+        ;; Build the full JDBC URI exactly as DBeaver would expect
+        full-url   (str "jdbc:arrow-flight-sql://"
+                        (or host "localhost")
+                        ":"
+                        (or port 443)
+                        (when-not (str/blank? qp) (str "?" qp)))]
+    ;; Now split it into subprotocol + subname for the JDBC spec
+    (let [scheme     "jdbc:arrow-flight-sql:"
+          subname    (subs full-url (count scheme))]
+      (-> {:classname   "org.apache.arrow.driver.jdbc.ArrowFlightJdbcDriver"
+           :subprotocol "arrow-flight-sql"
+           :subname     subname
+           :cast        (fn [col val]
+                          (if (and (= (:base-type col) :type/DateTime)
+                                   (instance? java.sql.Timestamp val))
+                            (.toLocalDateTime ^java.sql.Timestamp val)
+                            val))}
+))))
+
+
+
+
 
 ;; ----------------------------------------------------------------
 ;; Test the connection to the Arrow Flight SQL database.
