@@ -120,36 +120,33 @@
 ;; ----------------------------------------------------------------
 ;; Map raw database types to Metabase base types.
 ;; This converts a database-specific type into a standardized Metabase type.
+(def ^:private database-type->base-type
+  (sql-jdbc.sync/pattern-based-database-type->base-type
+   [[#"BOOL"                       :type/Boolean]
+    [#"INT(8|16|32|64)?$"          :type/Integer]
+    [#"UINT(8|16|32)$"             :type/Integer]
+    [#"UINT64"                     :type/BigInteger]
+    [#"BIGINT|HUGEINT"             :type/BigInteger]
+    [#"FLOAT(16|32|64)?$"          :type/Float]
+    [#"DOUBLE|REAL"                :type/Float]
+    [#"DECIMAL|NUMERIC"            :type/Decimal]
+    [#"DATE32|DATE"                :type/Date]
+    [#"TIME(32|64)?$"              :type/Time]
+    [#"TIMESTAMP"                  :type/DateTime]
+    [#"UTF8|CHAR|STRING|TEXT|VARCHAR" :type/Text]
+    [#"JSON"                       :type/JSON]
+    [#"UUID"                       :type/UUID]
+    ;; fallback for anything else
+    [#".*"                         :type/*]]))
+
 (defmethod sql-jdbc.sync/database-type->base-type :arrow-flight-sql
-  [_driver base-type]
-  (let [normalized (-> base-type str str/upper-case keyword)]
-    (case normalized
-      :BOOLEAN            :type/Boolean
-      :INT8               :type/Integer
-      :INT16              :type/Integer
-      :INT32              :type/Integer
-      :INT64              :type/BigInteger
-      :UINT8              :type/Integer
-      :UINT16             :type/Integer
-      :UINT32             :type/BigInteger
-      :UINT64             :type/BigInteger
-      :FLOAT16            :type/Float
-      :FLOAT32            :type/Float
-      :FLOAT64            :type/Float
-      :DECIMAL128         :type/Decimal
-      :DECIMAL256         :type/Decimal
-      :DATE32             :type/Date
-      :TIME32             :type/Time
-      :TIME64             :type/Time
-      :TIMESTAMP          :type/DateTime
-      :TIMESTAMP_MILLISECOND :type/DateTime
-      :TIMESTAMP_MICROSECOND :type/DateTime
-      :TIMESTAMP_NANOSECOND  :type/DateTime
-      :UTF8               :type/Text
-      :BINARY             :type/*
-      :FIXED_SIZE_BINARY  :type/*
-      :INTERVAL           :type/*
-      :type/*))) ;; Default type if none of the cases match
+  [_ raw-db-type]
+  ;; strip off any precision/scale qualifiers, e.g. "DECIMAL(10,2)" → "DECIMAL"
+  (let [normalized (-> raw-db-type
+                       (str/replace #"\(.*\)" "")
+                       str/upper-case)]
+    (database-type->base-type normalized)))
+
 
 ;; ----------------------------------------------------------------
 ;; Define a reader function for TIMESTAMP columns.
