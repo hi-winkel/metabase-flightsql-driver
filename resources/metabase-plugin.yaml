@@ -17,19 +17,15 @@ driver:
       display-name: Port
       placeholder: "443"
       required: true
-    - name: user
-      required: false
-      display-name: User
-    - merge:
-        - password
-      type: secret
-      display-name: Password
-      required: false
     - name: token
       display-name: Token (optional)
       type: secret
     - name: useEncryption
       display-name: Use Encryption
+      type: boolean
+      default: false
+    - name: disableCertificateVerification
+      display-name: Disable Cerificate Verification
       type: boolean
       default: true
     - advanced-options-start

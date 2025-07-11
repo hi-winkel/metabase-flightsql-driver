@@ -1,6 +1,12 @@
 version: v1
 kind: Spicepod
 name: file_recipe
+runtime:
+  auth:
+    api-key:
+      enabled: true
+      keys:
+        - 1234567890
 datasets:
   - name: yellow_taxis
     from: file://data/yellow_tripdata_2024-01.parquet
