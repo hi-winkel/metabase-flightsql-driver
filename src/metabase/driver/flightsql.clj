@@ -7,7 +7,7 @@
   (:import
    (java.sql PreparedStatement Timestamp)
    (java.time LocalDateTime)
-   (java.time LocalDate LocalTime)
+   (java.time LocalDate LocalTime OffsetDateTime)
    )
   (:require
    ;; String manipulation functions.
@@ -18,14 +18,8 @@
    [ring.util.codec :as codec]
    ;; Core Metabase driver functionality.
    [metabase.driver :as driver]
-   ;; Common functions for Metabase drivers.
-   [metabase.driver.common :as driver.common]
    ;; SQL generation and manipulation.
    [honey.sql :as sql]
-   ;; Metabase SQL-JDBC integration.
-   [metabase.driver.sql-jdbc :as sql-jdbc]
-   ;; Common functions for SQL-JDBC drivers.
-   [metabase.driver.sql-jdbc.common :as sql-jdbc.common]
    ;; Connection management for SQL-JDBC drivers.
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    ;; Logging utilities.
@@ -36,8 +30,8 @@
    [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
    ;; SQL execution helper functions.
    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
-   [metabase.util.honey-sql-2        :as h2x]
-   [metabase.driver.sql.query-processor :as sql.qp]
+   [metabase.util.honey-sql-2        :as h2x] 
+
    ))
 
 ;; ----------------------------------------------------------------
@@ -335,16 +329,35 @@
   (.setTimestamp stmt idx (Timestamp/valueOf dt)))
 
 (defmethod sql-jdbc.execute/set-parameter
+  [:arrow‑flight‑sql OffsetDateTime]
+  [_driver ^PreparedStatement stmt ^Integer idx ^OffsetDateTime odt]
+  ;; convert OffsetDateTime → Timestamp at the same instant
+  (.setTimestamp stmt
+                 idx
+                 (Timestamp/valueOf (.toLocalDateTime odt))))
+
+;; CORRECT: exactly 4 parameters: driver, stmt, idx, value
+(defmethod sql-jdbc.execute/set-parameter
   [:arrow-flight-sql LocalDate]
-  [_ _ stmt idx ^LocalDate d]
+  [_driver ^PreparedStatement stmt ^Integer idx ^java.time.LocalDate d]
   (.setDate stmt idx (java.sql.Date/valueOf d)))
 
 (defmethod sql-jdbc.execute/set-parameter
   [:arrow-flight-sql LocalTime]
-  [_ _ stmt idx ^LocalTime t]
+  [_driver ^PreparedStatement stmt ^Integer idx ^java.time.LocalTime t]
   (.setTime stmt idx (java.sql.Time/valueOf t)))
+
 
 
 (defmethod driver/db-start-of-week :arrow-flight-sql
   [_]
   :monday)
+
+(defmethod sql.qp/->honeysql
+  ;; inline the two-arg ["absolute-datetime" value _] form
+  [:arrow-flight-sql :absolute-datetime]
+  [_driver [_ value _options]]
+  ;; value is a java.time.LocalDate or LocalDateTime
+  (let [fmt (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm:ss")]
+    ;; embed as raw string literal
+    [:raw (str "'" (.format value fmt) "'")]))
