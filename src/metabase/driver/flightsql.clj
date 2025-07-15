@@ -3,7 +3,12 @@
 
   This driver uses the Apache Arrow Flight SQL JDBC driver.
   ...
-  "
+  " 
+  (:import
+   (java.sql PreparedStatement Timestamp)
+   (java.time LocalDateTime)
+   (java.time LocalDate LocalTime OffsetDateTime)
+   )
   (:require
    ;; String manipulation functions.
    [clojure.string :as str]
@@ -13,14 +18,8 @@
    [ring.util.codec :as codec]
    ;; Core Metabase driver functionality.
    [metabase.driver :as driver]
-   ;; Common functions for Metabase drivers.
-   [metabase.driver.common :as driver.common]
    ;; SQL generation and manipulation.
    [honey.sql :as sql]
-   ;; Metabase SQL-JDBC integration.
-   [metabase.driver.sql-jdbc :as sql-jdbc]
-   ;; Common functions for SQL-JDBC drivers.
-   [metabase.driver.sql-jdbc.common :as sql-jdbc.common]
    ;; Connection management for SQL-JDBC drivers.
    [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
    ;; Logging utilities.
@@ -31,6 +30,8 @@
    [metabase.driver.sql-jdbc.sync :as sql-jdbc.sync]
    ;; SQL execution helper functions.
    [metabase.driver.sql-jdbc.execute :as sql-jdbc.execute]
+   [metabase.util.honey-sql-2        :as h2x] 
+
    ))
 
 ;; ----------------------------------------------------------------
@@ -48,7 +49,8 @@
 (doseq [[feature supported?]
         {:describe-fields           true
          :connection-impersonation  false
-         :convert-timezone          true}]
+         :convert-timezone          true
+         :parameterized-sql         true}]
   (defmethod driver/database-supports? [:arrow-flight-sql feature]
     [_driver _feature _db]
     supported?))
@@ -120,36 +122,33 @@
 ;; ----------------------------------------------------------------
 ;; Map raw database types to Metabase base types.
 ;; This converts a database-specific type into a standardized Metabase type.
+(def ^:private database-type->base-type
+  (sql-jdbc.sync/pattern-based-database-type->base-type
+   [[#"BOOL"                       :type/Boolean]
+    [#"INT(8|16|32|64)?$"          :type/Integer]
+    [#"UINT(8|16|32)$"             :type/Integer]
+    [#"UINT64"                     :type/BigInteger]
+    [#"BIGINT|HUGEINT"             :type/BigInteger]
+    [#"FLOAT(16|32|64)?$"          :type/Float]
+    [#"DOUBLE|REAL"                :type/Float]
+    [#"DECIMAL|NUMERIC"            :type/Decimal]
+    [#"DATE32|DATE"                :type/Date]
+    [#"TIME(32|64)?$"              :type/Time]
+    [#"TIMESTAMP"                  :type/DateTime]
+    [#"UTF8|CHAR|STRING|TEXT|VARCHAR" :type/Text]
+    [#"JSON"                       :type/JSON]
+    [#"UUID"                       :type/UUID]
+    ;; fallback for anything else
+    [#".*"                         :type/*]]))
+
 (defmethod sql-jdbc.sync/database-type->base-type :arrow-flight-sql
-  [_driver base-type]
-  (let [normalized (-> base-type str str/upper-case keyword)]
-    (case normalized
-      :BOOLEAN            :type/Boolean
-      :INT8               :type/Integer
-      :INT16              :type/Integer
-      :INT32              :type/Integer
-      :INT64              :type/BigInteger
-      :UINT8              :type/Integer
-      :UINT16             :type/Integer
-      :UINT32             :type/BigInteger
-      :UINT64             :type/BigInteger
-      :FLOAT16            :type/Float
-      :FLOAT32            :type/Float
-      :FLOAT64            :type/Float
-      :DECIMAL128         :type/Decimal
-      :DECIMAL256         :type/Decimal
-      :DATE32             :type/Date
-      :TIME32             :type/Time
-      :TIME64             :type/Time
-      :TIMESTAMP          :type/DateTime
-      :TIMESTAMP_MILLISECOND :type/DateTime
-      :TIMESTAMP_MICROSECOND :type/DateTime
-      :TIMESTAMP_NANOSECOND  :type/DateTime
-      :UTF8               :type/Text
-      :BINARY             :type/*
-      :FIXED_SIZE_BINARY  :type/*
-      :INTERVAL           :type/*
-      :type/*))) ;; Default type if none of the cases match
+  [_ raw-db-type]
+  ;; strip off any precision/scale qualifiers, e.g. "DECIMAL(10,2)" → "DECIMAL"
+  (let [normalized (-> raw-db-type
+                       (str/replace #"\(.*\)" "")
+                       str/upper-case)]
+    (database-type->base-type normalized)))
+
 
 ;; ----------------------------------------------------------------
 ;; Define a reader function for TIMESTAMP columns.
@@ -241,3 +240,124 @@
       :where (vec (cons :and where-clause))
       :order-by [:table_schema :table_name :ordinal_position]}
      :dialect (sql.qp/quote-style driver))))
+
+
+;; ----------------------------------------------------------------
+;; Support `… - INTERVAL 'N unit'` in filters like "yesterday"
+(defmethod sql.qp/add-interval-honeysql-form :arrow-flight-sql
+  [_driver hsql-form amount unit]
+  (if (= unit :quarter)
+    ;; Duck the lack of quarters by translating 1 quarter → 3 months, etc.
+    (recur _driver hsql-form (* amount 3) :month)
+    ;; Build: (<hsql-form> + INTERVAL 'amount unit')
+    (h2x/+ (h2x/->timestamp-with-time-zone hsql-form)
+           [:raw (format "(INTERVAL '%d' %s)" (int amount) (name unit))])))
+
+
+;; ----------------------------------------------------------------
+;; Support date‐truncation and extraction for Arrow Flight SQL
+(defmethod sql.qp/date [:arrow-flight-sql :default]
+  [_driver _expr-type expr]
+  ;; fall back to the raw expression
+  expr)
+
+(defmethod sql.qp/date [:arrow-flight-sql :minute]
+  [_driver _ expr]
+  [:date_trunc (h2x/literal :minute) expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :minute-of-hour]
+  [_driver _ expr]
+  [:minute expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :hour]
+  [_driver _ expr]
+  [:date_trunc (h2x/literal :hour) expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :hour-of-day]
+  [_driver _ expr]
+  [:hour expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :day]
+  [_driver _ expr]
+  [:date_trunc (h2x/literal :day) expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :day-of-month]
+  [_driver _ expr]
+  [:day expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :day-of-year]
+  [_driver _ expr]
+  [:dayofyear expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :day-of-week]
+  [driver _ expr]
+  ;; adjust to Metabase's configured start‐of‐week
+  (sql.qp/adjust-day-of-week driver [:isodow expr]))
+
+(defmethod sql.qp/date [:arrow-flight-sql :week]
+  [driver _ expr]
+  ;; preserves your db‐start‐of‐week setting
+  (sql.qp/adjust-start-of-week
+   driver
+   (partial conj [:date_trunc] (h2x/literal :week))
+   expr))
+
+(defmethod sql.qp/date [:arrow-flight-sql :month]
+  [_driver _ expr]
+  [:date_trunc (h2x/literal :month) expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :month-of-year]
+  [_driver _ expr]
+  [:month expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :quarter]
+  [_driver _ expr]
+  [:date_trunc (h2x/literal :quarter) expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :quarter-of-year]
+  [_driver _ expr]
+  [:quarter expr])
+
+(defmethod sql.qp/date [:arrow-flight-sql :year]
+  [_driver _ expr]
+  [:date_trunc (h2x/literal :year) expr])
+
+(defmethod sql-jdbc.execute/set-parameter
+  ;; Bind a LocalDateTime into the PreparedStatement as a SQL Timestamp
+  [:arrow-flight-sql LocalDateTime]
+  [_driver ^PreparedStatement stmt ^Integer idx ^LocalDateTime dt]
+  (.setTimestamp stmt idx (Timestamp/valueOf dt)))
+
+(defmethod sql-jdbc.execute/set-parameter
+  [:arrow‑flight‑sql OffsetDateTime]
+  [_driver ^PreparedStatement stmt ^Integer idx ^OffsetDateTime odt]
+  ;; convert OffsetDateTime → Timestamp at the same instant
+  (.setTimestamp stmt
+                 idx
+                 (Timestamp/valueOf (.toLocalDateTime odt))))
+
+;; CORRECT: exactly 4 parameters: driver, stmt, idx, value
+(defmethod sql-jdbc.execute/set-parameter
+  [:arrow-flight-sql LocalDate]
+  [_driver ^PreparedStatement stmt ^Integer idx ^java.time.LocalDate d]
+  (.setDate stmt idx (java.sql.Date/valueOf d)))
+
+(defmethod sql-jdbc.execute/set-parameter
+  [:arrow-flight-sql LocalTime]
+  [_driver ^PreparedStatement stmt ^Integer idx ^java.time.LocalTime t]
+  (.setTime stmt idx (java.sql.Time/valueOf t)))
+
+
+
+(defmethod driver/db-start-of-week :arrow-flight-sql
+  [_]
+  :monday)
+
+(defmethod sql.qp/->honeysql
+  ;; inline the two-arg ["absolute-datetime" value _] form
+  [:arrow-flight-sql :absolute-datetime]
+  [_driver [_ value _options]]
+  ;; value is a java.time.LocalDate or LocalDateTime
+  (let [fmt (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm:ss")]
+    ;; embed as raw string literal
+    [:raw (str "'" (.format value fmt) "'")]))
