@@ -54,5 +54,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: metabase-arrow-flight-sql-driver
-        path: metabase/resources/modules/arrow-flight-sql.metabase-driver.jar
+        path: metabase/resources/modules/flightsql-metabase-driver.jar
         if-no-files-found: error
