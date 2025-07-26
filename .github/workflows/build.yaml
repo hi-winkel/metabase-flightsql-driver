@@ -31,7 +31,7 @@ jobs:
     - name: Register arrow-flight-sql in deps.edn
       working-directory: ./metabase
       run: |
-        cp metabase/modules/drivers/arrow-flight-sql/ci/deps.edn modules/drivers/deps.edn
+        cp modules/drivers/arrow-flight-sql/ci/deps.edn modules/drivers/deps.edn
         echo "--- Verifying modules/drivers/deps.edn content ---"
         cat modules/drivers/deps.edn
         echo "----------------------------------------------------"

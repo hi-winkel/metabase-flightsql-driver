@@ -24,4 +24,4 @@
   metabase/sqlserver          {:local/root "sqlserver"}
   metabase/starburst          {:local/root "starburst"}
   metabase/vertica            {:local/root "vertica"}
-  metabase/arrow‑flight‑sql   {:local/root "arrow‑flight‑sql"}}}
+  metabase/arrow-flight-sql   {:local/root "arrow-flight-sql"}}}
