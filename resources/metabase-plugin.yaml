@@ -36,6 +36,6 @@ driver:
 
 init:
   - step: load-namespace
-    namespace:  metabase.driver.flightsql
+    namespace:  metabase.driver.arrow-flight-sql
   - step: register-jdbc-driver
     class: org.apache.arrow.driver.jdbc.ArrowFlightJdbcDriver
