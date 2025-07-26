@@ -329,7 +329,7 @@
   (.setTimestamp stmt idx (Timestamp/valueOf dt)))
 
 (defmethod sql-jdbc.execute/set-parameter
-  [:arrow‑flight‑sql OffsetDateTime]
+  [:arrow-flight-sql OffsetDateTime]
   [_driver ^PreparedStatement stmt ^Integer idx ^OffsetDateTime odt]
   ;; convert OffsetDateTime → Timestamp at the same instant
   (.setTimestamp stmt
