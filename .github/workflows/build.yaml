@@ -52,6 +52,7 @@ jobs:
         
     - name: Upload driver artifact
       uses: actions/upload-artifact@v4
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       with:
         name: metabase-arrow-flight-sql-driver
         path: metabase/resources/modules/arrow-flight-sql.metabase-driver.jar
