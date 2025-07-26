@@ -1,4 +1,4 @@
-name: Build Metabase FlightSQL Driver
+name: Build Metabase arrow-flight-sql Driver
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
     - name: Checkout driver code
       uses: actions/checkout@v4
       with:
-        path: metabase/modules/drivers/flightsql
+        path: metabase/modules/drivers/arrow-flight-sql
         
     - name: Set up JDK 21
       uses: actions/setup-java@v4
@@ -48,11 +48,11 @@ jobs:
       working-directory: ./metabase
       run: |
         chmod +x ./bin/build-driver.sh
-        ./bin/build-driver.sh flightsql
+        ./bin/build-driver.sh arrow-flight-sql
         
     - name: Upload driver artifact
       uses: actions/upload-artifact@v4
       with:
-        name: metabase-flightsql-driver
-        path: metabase/resources/modules/flightsql.metabase-driver.jar
+        name: metabase-arrow-flight-sql-driver
+        path: metabase/resources/modules/arrow-flight-sql.metabase-driver.jar
         if-no-files-found: error
