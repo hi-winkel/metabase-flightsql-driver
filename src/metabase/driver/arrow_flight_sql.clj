@@ -5,9 +5,8 @@
   ...
   " 
   (:import
-   (java.sql PreparedStatement Timestamp)
-   (java.time LocalDateTime)
-   (java.time LocalDate LocalTime OffsetDateTime)
+   (java.sql PreparedStatement Timestamp Types Date Time)
+   (java.time LocalDate LocalTime LocalDateTime OffsetDateTime)
    )
   (:require
    ;; String manipulation functions.
@@ -69,42 +68,53 @@
 ;; ----------------------------------------------------------------
 (defmethod sql-jdbc.conn/connection-details->spec :arrow-flight-sql
   [_ details]
-  (let [{:keys [host port token useEncryption disableCertificateVerification]
+  (let [{:keys [host port token user password useEncryption disableCertificateVerification]
          :or   {useEncryption true
                 disableCertificateVerification false}} details
-        ;; URI-encode _only_ the raw token
-        enc-token (when (and (string? token)
-                             (not (str/blank? token)))
+
+        ;; URL-encode only provided creds
+        enc-token (when (and (string? token) (not (str/blank? token)))
                     (codec/url-encode token))
-        ;; Manually assemble each key=value pair
-        params    (cond-> []
-                    enc-token    (conj (str "authorization=Bearer%20" enc-token))
-                    true         (conj (str "useEncryption=" useEncryption))
-                    true         (conj (str "disableCertificateVerification="
-                                            disableCertificateVerification)))
-        qp         (str/join "&" params)
-        ;; Build the full JDBC URI exactly as DBeaver would expect
-        full-url   (str "jdbc:arrow-flight-sql://"
-                        (or host "localhost")
-                        ":"
-                        (or port 443)
-                        (when-not (str/blank? qp) (str "?" qp)))]
-    ;; Now split it into subprotocol + subname for the JDBC spec
-    (let [scheme     "jdbc:arrow-flight-sql:"
-          subname    (subs full-url (count scheme))]
-      (-> {:classname   "org.apache.arrow.driver.jdbc.ArrowFlightJdbcDriver"
-           :subprotocol "arrow-flight-sql"
-           :subname     subname
-           :cast        (fn [col val]
-                          (if (and (= (:base-type col) :type/DateTime)
-                                   (instance? java.sql.Timestamp val))
-                            (.toLocalDateTime ^java.sql.Timestamp val)
-                            val))}
-))))
+        enc-user  (when (and (string? user) (not (str/blank? user)))
+                    (codec/url-encode user))
+        enc-pass  (when (and (string? password) (not (str/blank? password)))
+                    (codec/url-encode password))
 
+        ;; Choose exactly ONE auth mode: token wins over user/pass
+        auth-qps  (cond
+                    enc-token               [(str "authorization=Bearer%20" enc-token)]
+                    (and enc-user enc-pass) [(str "user=" enc-user)
+                                             (str "password=" enc-pass)]
+                    :else                   [])
 
+        ;; Build query params
+        params    (-> []
+                      (into auth-qps)
+                      (conj (str "useEncryption=" useEncryption))
+                      (conj (str "disableCertificateVerification=" disableCertificateVerification)))
+        qp        (str/join "&" params)
 
+        ;; Full JDBC URL
+        full-url  (str "jdbc:arrow-flight-sql://"
+                       (or host "localhost") ":"
+                       (or port 443)
+                       (when-not (str/blank? qp) (str "?" qp)))]
 
+    ;; Return spec
+    (let [scheme  "jdbc:arrow-flight-sql:"
+          subname (subs full-url (count scheme))]
+      {:classname   "org.apache.arrow.driver.jdbc.ArrowFlightJdbcDriver"
+       :subprotocol "arrow-flight-sql"
+       :subname     subname
+       :cast (fn [col val]
+               (case (:base-type col)
+                 :type/Date     (if (instance? java.sql.Date val) (.toLocalDate ^java.sql.Date val) val)
+                 :type/Time     (if (instance? java.sql.Time val) (.toLocalTime ^java.sql.Time val) val)
+                 :type/DateTime (cond
+                                  (instance? java.sql.Timestamp val) (.toLocalDateTime ^java.sql.Timestamp val)
+                                  (instance? java.time.OffsetDateTime val) (.toLocalDateTime ^java.time.OffsetDateTime val)
+                                  :else val)
+                 val))})))
 
 ;; ----------------------------------------------------------------
 ;; Test the connection to the Arrow Flight SQL database.
@@ -158,6 +168,22 @@
   (fn []
     (some-> (.getTimestamp rs i)
             .toLocalDateTime)))
+
+;; ----------------------------------------------------------------
+;; Define a reader function for DATE columns.
+;; Retrieves a timestamp from the ResultSet and converts it to a local date.
+(defmethod sql-jdbc.execute/read-column-thunk
+  [:arrow-flight-sql java.sql.Types/DATE]
+  [_driver ^java.sql.ResultSet rs _rsmeta ^Integer i]
+  (fn [] (some-> (.getDate rs i) .toLocalDate)))
+
+;; ----------------------------------------------------------------
+;; Define a reader function for TIME columns.
+;; Retrieves a timestamp from the ResultSet and converts it to a local time.
+(defmethod sql-jdbc.execute/read-column-thunk
+  [:arrow-flight-sql java.sql.Types/TIME]
+  [_driver ^java.sql.ResultSet rs _rsmeta ^Integer i]
+  (fn [] (some-> (.getTime rs i) .toLocalTime)))
 
 ;; ----------------------------------------------------------------
 ;; Custom Schema Sync Implementations
