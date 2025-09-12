@@ -3,53 +3,59 @@ info:
   version: 1.0.0-SNAPSHOT-1.0.0
   description: Allows Metabase to connect to databases via the Apache Arrow Flight SQL JDBC driver.
 
+# contact-info belongs at the top level (not inside driver)
+contact-info:
+  name: Metabase FlightSQL Driver
+  address: https://github.com/J0hnG4lt/metabase-flightsql-driver/issues
+
 driver:
   name: arrow-flight-sql
   display-name: Arrow Flight SQL
   lazy-load: true
   parent: sql-jdbc
-  contact-info: "https://github.com/J0hnG4lt/metabase-flightsql-driver/issues"
-  connection-properties:
-    - name: host
-      display-name: Host
-      placeholder: "localhost"
-      required: true
-    - name: port
-      display-name: Port
-      placeholder: "443"
-      type: integer
-      required: true
 
+  connection-properties:
+    # Use built-in host; override placeholder if you want
+    - merge:
+        - host
+        - { placeholder: "localhost" }
+
+    # Use built-in port; override placeholder
+    - merge:
+        - port
+        - { placeholder: "443" }
+
+    # Username is custom (built-in is 'user'); that's fine
     - name: username
       display-name: Username (optional)
       required: false
 
-    # Use the built-in password template; put overrides INSIDE the merge list
+    # Built-in password; just make it optional in UI
     - merge:
         - password
-        - display-name: Password (optional)
-        - required: false
+        - { display-name: "Password (optional)", required: false }
 
-    # Token as a secret field using the same password template
-    - merge:
-        - password
-        - name: token
-        - display-name: Token (optional)
-        - required: false
+    # Token is a NEW field (do not use merge here)
+    - name: token
+      display-name: Token (optional)
+      type: secret
+      required: false
 
     - name: useEncryption
       display-name: Use Encryption
       type: boolean
-      default: true
+      default: false
+
     - name: disableCertificateVerification
       display-name: Disable Certificate Verification
       type: boolean
-      default: false
+      default: true
 
+    # Advanced section helpers are literal strings
     - advanced-options-start
     - merge:
         - additional-options
-        - placeholder: "threadPoolSize=1"
+        - { placeholder: "threadPoolSize=1" }
     - default-advanced-options
 
 init:
