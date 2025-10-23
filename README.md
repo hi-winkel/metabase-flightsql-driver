@@ -57,6 +57,7 @@ When setting up the connection in Metabase, the driver registers under the name 
 - User: (Optional) – Username for authentication.
 - Password: (Optional) – Password for authentication (supports secret merging).
 - Token: (Optional) – A secure token for connection.
+- Catalog: (Optional) - The name of the catalog to use.  If not specified, the default catalog will be used.
 - Use Encryption: (Default: true) – Enable or disable connection encryption. We don´t use this in our tests.
 
 Advanced options can be set via the additional-options field.

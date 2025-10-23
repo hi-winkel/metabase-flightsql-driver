@@ -41,6 +41,11 @@ driver:
       type: secret
       required: false
 
+    - name: catalog
+      display-name: Catalog (optional)
+      type: string
+      required: false
+
     - name: useEncryption
       display-name: Use Encryption
       type: boolean

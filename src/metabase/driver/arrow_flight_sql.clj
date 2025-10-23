@@ -64,7 +64,7 @@
 ;; ----------------------------------------------------------------
 (defmethod sql-jdbc.conn/connection-details->spec :arrow-flight-sql
   [_ details]
-  (let [{:keys [host port token username user password useEncryption disableCertificateVerification]
+  (let [{:keys [host port token username user password catalog useEncryption disableCertificateVerification]
          :or   {useEncryption true
                 disableCertificateVerification false}} details
         ;; prefer :username (manifest) but fall back to :user
@@ -84,10 +84,13 @@
                     :else                   [])
 
         ;; Build query params
-        params    (-> []
-                      (into auth-qps)
-                      (conj (str "useEncryption=" (boolean useEncryption)))
-                      (conj (str "disableCertificateVerification=" (boolean disableCertificateVerification))))
+        params    (cond-> []
+                    true (into auth-qps)
+                    true (conj (str "useEncryption=" (boolean useEncryption)))
+                    true (conj (str "disableCertificateVerification=" (boolean disableCertificateVerification)))
+                    ;; Add catalog if specified
+                    (and (string? catalog) (not (str/blank? catalog)))
+                    (conj (str "catalog=" (codec/url-encode catalog))))
         qp        (str/join "&" params)
 
         ;; Full JDBC URL
@@ -95,6 +98,7 @@
                        (or host "localhost") ":"
                        (or port 443)
                        (when-not (str/blank? qp) (str "?" qp)))]
+        (log/debug "Arrow Flight SQL connection URL:" full-url)
     (let [scheme  "jdbc:arrow-flight-sql:"
           subname (subs full-url (count scheme))]
       {:classname   "org.apache.arrow.driver.jdbc.ArrowFlightJdbcDriver"
@@ -115,13 +119,29 @@
 ;; Executes a simple "SELECT 1" query to verify connectivity.
 (defmethod driver/can-connect? :arrow-flight-sql
   [driver details]
-  (try
-    (sql-jdbc.conn/with-connection-spec-for-testing-connection [spec [driver details]]
-      (jdbc/query spec "SELECT 1"))
-    true
-    (catch Exception e
-      (log/error e "Flight SQL connection test failed.")
-      false)))
+  (let [query-succeeded? (atom false)]
+    (try
+      (let [spec (sql-jdbc.conn/connection-details->spec driver details)]
+        (log/info "Testing connection with spec, attempting to get connection...")
+        (try
+          (with-open [conn (jdbc/get-connection spec)]
+            (log/info "Connection obtained, executing test query...")
+            (let [result (jdbc/query {:connection conn} ["SELECT 1"])]
+              (log/info "Test query successful:" result)
+              (reset! query-succeeded? true)
+              true))
+          (catch java.sql.SQLException e
+            ;; If the query succeeded but closing failed (known issue with Flight SQL + catalog param),
+            ;; treat as successful connection
+            (if @query-succeeded?
+              (do
+                (log/warn "Connection close failed but query succeeded, treating as success:" (.getMessage e))
+                true)
+              (throw e)))))
+      (catch Exception e
+        (log/error e "Flight SQL connection test failed.")
+        false))))
+
 
 ;; ----------------------------------------------------------------
 ;; Map raw database types to Metabase base types.
@@ -183,27 +203,42 @@
 ;; Custom Schema Sync Implementations
 ;; ----------------------------------------------------------------
 
+;; Helper function to safely close connections when catalog parameter is used
+(defn- safely-close-connection [conn]
+  (try
+    (.close conn)
+    (catch java.sql.SQLException e
+      (when-not (re-find #"Channel shutdown" (.getMessage e))
+        (throw e))
+      ;; Log but ignore "Channel shutdown" errors during close
+      (log/debug "Ignoring connection close error (known Flight SQL issue with catalog param):" (.getMessage e)))))
+
+
 ;; List tables by querying information_schema.tables.
 (defmethod driver/describe-database :arrow-flight-sql
   [driver database]
-  (let [spec (sql-jdbc.conn/connection-details->spec :arrow-flight-sql (:details database))]
-    (with-open [conn (jdbc/get-connection spec)]
+  (let [spec (sql-jdbc.conn/connection-details->spec :arrow-flight-sql (:details database))
+        conn (jdbc/get-connection spec)]
+    (try
       (let [rows (jdbc/query {:connection conn}
-                             ["SELECT table_name, table_schema FROM information_schema.tables"]
+                             ["SELECT table_name, table_schema FROM information_schema.tables WHERE table_catalog = CURRENT_CATALOG()"]
                              {:identifiers str/lower-case})
             formatted (->> rows
                            (filter #(not= (str/lower-case (:table_schema %)) "information_schema"))
                            (map (fn [row]
                                   {:name   (:table_name row)
                                    :schema (:table_schema row)})))]
-        {:tables (into #{} formatted)})))) ;; Return a set of formatted table information
+        {:tables (into #{} formatted)})
+      (finally
+        (safely-close-connection conn)))))
 
 ;; ----------------------------------------------------------------
 ;; Describe a specific table by executing a DESCRIBE query.
 (defmethod driver/describe-table :arrow-flight-sql
   [_ driver database {:keys [name schema]}]
-  (let [spec (sql-jdbc.conn/connection-details->spec :arrow-flight-sql (:details database))]
-    (with-open [conn (jdbc/get-connection spec)]
+  (let [spec (sql-jdbc.conn/connection-details->spec :arrow-flight-sql (:details database))
+        conn (jdbc/get-connection spec)]
+    (try
       (let [query   (format "DESCRIBE \"%s\".\"%s\"" schema name) ;; Build the DESCRIBE query using schema and table name
             results (jdbc/query {:connection conn} [query] {:identifiers str/lower-case})
             fields  (mapv (fn [{:keys [column_name data_type is_nullable]}]
@@ -221,7 +256,9 @@
         (log/info "Parsed fields:" fields)
         {:name name
          :schema schema
-         :fields fields}))))
+         :fields fields})
+      (finally
+        (safely-close-connection conn)))))
 
 ;; ----------------------------------------------------------------
 ;; Define a method to describe table foreign keys.
@@ -237,13 +274,14 @@
 (defmethod sql-jdbc.sync/describe-fields-sql :arrow-flight-sql
   [driver & {:keys [schema-names table-names details]}]
   (let [base-condition [:>= [:inline 1] [:inline 1]]
+        catalog-condition [:= :table_catalog [:raw "CURRENT_CATALOG()"]]
         schema-condition (when (seq schema-names)
                            [:in [:lower :table_schema]
                             (mapv (fn [s] [:inline (str/lower-case s)]) schema-names)])
         table-condition (when (seq table-names)
                           [:in [:lower :table_name]
                            (mapv (fn [t] [:inline (str/lower-case t)]) table-names)])
-        where-clause (cond-> [base-condition]
+        where-clause (cond-> [base-condition catalog-condition]
                        schema-condition (conj schema-condition)
                        table-condition (conj table-condition))]
     (sql/format
