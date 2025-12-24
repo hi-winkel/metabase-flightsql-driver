@@ -300,7 +300,8 @@ class MetabaseClient:
 
     def create_gizmosql_connection(self, host: str = "gizmosql", port: int = 31337,
                                     username: str = "gizmosql",
-                                    password: str = "gizmosql_password") -> Optional[Dict]:
+                                    password: str = "gizmosql_password",
+                                    catalog: str = "memory") -> Optional[Dict]:
         """Create GizmoSQL database connection"""
         return self.create_database(
             name="gizmo",
@@ -310,6 +311,7 @@ class MetabaseClient:
                 "port": port,
                 "username": username,
                 "password": password,
+                "catalog": catalog,
                 "useEncryption": False,
                 "disableCertificateVerification": True
             }

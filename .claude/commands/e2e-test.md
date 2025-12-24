@@ -132,7 +132,7 @@ podman logs metabase 2>&1 | grep -i "hash.*changed" | tail -5
 | Filtered query status | `completed` |
 | Filtered query rows | 9 (for status=Delivered) |
 | Connection pool warnings | None ("Hash of database details changed" should not appear) |
-| GizmoSQL tables synced | 13 tables across 3 schemas (analytics, hr, sales) |
+| GizmoSQL tables synced | 13 tables in memory catalog (analytics, hr, sales schemas) |
 | Spice tables synced | 1 table |
 
 ## Troubleshooting
