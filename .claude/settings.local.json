@@ -30,7 +30,8 @@
       "Bash(then echo \"Timeout\")",
       "Bash(cat:*)",
       "Bash(gh pr diff:*)",
-      "Bash(then echo \"\")"
+      "Bash(then echo \"\")",
+      "Skill(e2e-test)"
     ]
   }
 }

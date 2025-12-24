@@ -65,10 +65,10 @@ services:
       - metanet1
 
   spiced:
-    image: spiceai/spiceai:1.0.6
+    image: spiceai/spiceai:1.10.2
     container_name: spiced-container
     privileged: true
-    user: root
+    # Note: removed 'user: root' as spiceai 1.10.2+ doesn't have root in passwd file
     # this tmpfs prevents an error when the setup script of the dockerfile tries to create this folder after an initial run
     tmpfs:
       - /spice_sandbox
