@@ -95,7 +95,7 @@ services:
     hostname: gizmosql
     volumes:
       - type: bind
-        source: ./gizmosql-init.sql
+        source: ./gizmosql/init.sql
         target: /opt/gizmosql/init.sql
     environment:
       TLS_ENABLED: "false"
