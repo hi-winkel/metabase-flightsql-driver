@@ -337,7 +337,7 @@
                [[:case-expr [:= :is_nullable [:inline "NO"]] [:inline true] [:inline false]]
                 :database-required]
                [[:inline ""] :field-comment]]
-      :from [[:raw "information_schema.\"COLUMNS\""]]
+      :from [[[:raw "information_schema.\"COLUMNS\""]]]
       :where (vec (cons :and where-clause))
       :order-by [:table_schema :table_name :ordinal_position]}
      :quoted false)))
