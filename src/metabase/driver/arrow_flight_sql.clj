@@ -304,15 +304,6 @@
          :fields fields})
       (finally
         (safely-close-connection conn)))))
-
-;; ----------------------------------------------------------------
-;; Define a method to describe table foreign keys.
-;; Since FlightSQL does not support imported keys, this returns an empty set.
-(defmethod driver/describe-table-fks :arrow-flight-sql
-  [_ _ _]
-  ;; Return an empty set so that foreign key synchronization doesn't fail.
-  #{})
-
 ;; ----------------------------------------------------------------
 ;; Describe fields by querying the information_schema.columns table.
 ;; Builds a dynamic SQL query based on provided schema and table names.
