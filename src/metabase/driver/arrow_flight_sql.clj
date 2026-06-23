@@ -340,7 +340,7 @@
       :from [[:raw "information_schema.\"COLUMNS\""]]
       :where (vec (cons :and where-clause))
       :order-by [:table_schema :table_name :ordinal_position]}
-             :quoted false))))
+     :quoted false))))
 
 ;; ----------------------------------------------------------------
 ;; Best Practice: Enforce ANSI quoting style for Dremio / Arrow Flight
