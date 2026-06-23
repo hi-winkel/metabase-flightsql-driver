@@ -259,8 +259,8 @@
         use-catalog? (and (string? catalog) (not (str/blank? catalog)))
         ;; Filter by table_catalog when specified
         query (if use-catalog?
-                (format "SELECT table_name, table_schema FROM information_schema.tables WHERE LOWER(table_catalog) = LOWER('%s')" catalog)
-                "SELECT table_name, table_schema FROM information_schema.tables")
+                (format "SELECT table_name, table_schema FROM information_schema.\"TABLES\" WHERE LOWER(table_catalog) = LOWER('%s')" catalog)
+                "SELECT table_name, table_schema FROM information_schema.\"TABLES\"")
         conn (jdbc/get-connection spec)]
     (try
       (let [rows (jdbc/query {:connection conn}
@@ -346,11 +346,17 @@
                [[:case-expr [:= :is_nullable [:inline "NO"]] [:inline true] [:inline false]]
                 :database-required]
                [[:inline ""] :field-comment]]
-      :from [[:information_schema.columns]]
+      :from [[:raw "information_schema.\"COLUMNS\""]]
       :where (vec (cons :and where-clause))
       :order-by [:table_schema :table_name :ordinal_position]}
      :dialect (sql.qp/quote-style driver))))
 
+;; ----------------------------------------------------------------
+;; Best Practice: Enforce ANSI quoting style for Dremio / Arrow Flight
+;; ----------------------------------------------------------------
+(defmethod sql.qp/quote-style :arrow-flight-sql
+  [_driver]
+  :ansi)
 
 ;; ----------------------------------------------------------------
 ;; Support `… - INTERVAL 'N unit'` in filters like "yesterday"
